@@ -1,0 +1,84 @@
+{
+  "kicks_to_ping": 10,
+  "min_players_for_kick": 10,
+  "player_similar_name_probability": 0.97,
+  "weapon_similar_name_probability": 0.85,
+  "save_screenshots": false,
+  "rotate_delay": 2.0,
+  "player_name_box": {
+    "x": 730,
+    "y": 970,
+    "width": 460,
+    "height": 42
+  },
+  "weapon_icon_probability": 0.9,
+  "weapon_icon_box": {
+    "x": 1460,
+    "y": 760,
+    "width": 90,
+    "height": 65
+  },
+  "weapon_slot_1_name_box": {
+    "x": 1570,
+    "y": 805,
+    "width": 320,
+    "height": 30
+  },
+  "weapon_slot_2_name_box": {
+    "x": 1570,
+    "y": 865,
+    "width": 320,
+    "height": 30
+  },
+  "gadget_slot_1_box": {
+    "x": 1550,
+    "y": 925,
+    "width": 320,
+    "height": 30
+  },
+  "gadget_slot_2_box": {
+    "x": 1550,
+    "y": 975,
+    "width": 320,
+    "height": 30
+  },
+  "ally_colour": [
+    64,
+    192,
+    255
+  ],
+  "enemy_colour": [
+    255,
+    80,
+    64
+  ],
+  "banned_vehicles": {
+    "heavybomber": {
+      "primary_names": [
+        "HEAVY BOMBER",
+        "BOMBS"
+      ],
+      "secondary_names": [
+        "BOMBS",
+        "HEAVY BOMBER"
+      ]
+    },
+    "hmg": {
+      "primary_names": [
+        "LMG"
+      ],
+      "secondary_names": [
+        "MORTAR",
+        "MORTAR TRUCK"
+      ]
+    }
+  },
+  "banned_weapon": {
+    "weapon_names": [
+      "SMG 08/18 Factory",
+      "SMG 08/18 Optical",
+      "SMG 08/18",
+      "SMG08/18"
+    ]
+  }
+}

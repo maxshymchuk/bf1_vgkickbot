@@ -38,10 +38,10 @@ use sysinfo::System;
 use tokio::sync::{Mutex, OnceCell, RwLock};
 use tokio::time::sleep;
 use win_screenshot::prelude::find_window;
+use windows::core::PCSTR;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Console::SetConsoleCtrlHandler;
 use windows::Win32::UI::WindowsAndMessaging::{FindWindowA, SetForegroundWindow};
-use windows_core::PCSTR;
 /*
 Don't try refactor this piece of shit, it works on hopes, dreams and an incredibly poorly written web of functions
  */
@@ -158,7 +158,7 @@ async fn focus_bf1_once_running() {
     }
 }
 
-unsafe extern "system" fn close_handler(_: u32) -> windows_core::BOOL {
+unsafe extern "system" fn close_handler(_: u32) -> windows::core::BOOL {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -183,7 +183,7 @@ unsafe extern "system" fn close_handler(_: u32) -> windows_core::BOOL {
             );
         });
 
-    windows_core::BOOL(1)
+    windows::core::BOOL(1)
 }
 
 fn main() -> io::Result<()> {

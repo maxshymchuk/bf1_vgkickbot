@@ -1,12 +1,12 @@
 use crate::errors::KickbotError;
 use crate::recognition::screenshot::Screenshot;
-use ndarray::{ArrayBase, Axis, CowRepr, Ix2, Ix3, Ix4, OwnedRepr};
+use ndarray::{ArrayBase, Axis, Ix4, OwnedRepr};
 use opencv::core::{Mat, MatTraitConst, MatTraitConstManual, Vector};
 use opencv::{self as cv};
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::Tensor;
-use std::fmt::{Display, Formatter};
+use std::sync::Mutex;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum WeaponClasses {
@@ -18,7 +18,7 @@ pub enum WeaponClasses {
 }
 
 pub struct Classifier {
-    model: Session,
+    model: Mutex<Session>,
 }
 
 impl Classifier {
@@ -29,9 +29,11 @@ impl Classifier {
             .unwrap()
             .with_intra_threads(4)
             .unwrap()
-            .commit_from_file("bf1ai.onnx")
+            .commit_from_file("model_weights/weapon_vehicle_classifier.onnx")
             .unwrap();
-        Classifier { model }
+        Classifier {
+            model: Mutex::new(model),
+        }
     }
 
     fn center_crop(&self, image: &Mat, size: cv::core::Size) -> Mat {
@@ -102,8 +104,12 @@ impl Classifier {
         let image_array = self.preprocess(image)?;
 
         let tensor = Tensor::from_array(image_array)?;
-        let outputs = self.model.run(ort::inputs![tensor]?)?;
-        let predictions = outputs[0].try_extract_tensor::<f32>()?;
+        let mut model = self
+            .model
+            .lock()
+            .map_err(|err| KickbotError::ModelError(err.to_string()))?;
+        let outputs = model.run(ort::inputs![tensor])?;
+        let (_, predictions) = outputs[0].try_extract_tensor::<f32>()?;
 
         let predictions_max = predictions.iter().cloned().reduce(f32::max).unwrap();
         let exp_scores = predictions

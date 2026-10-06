@@ -1,7 +1,7 @@
 use crate::console::log;
 use crate::discord::{announce_player_multiple_kicks, DiscordWebhook};
 use crate::errors::KickbotError;
-use crate::errors::KickbotError::{IOError, JsonError};
+use crate::errors::KickbotError::IOError;
 use crate::recognition::enhance::RGB;
 use crate::recognition::model::WeaponClasses;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
@@ -10,6 +10,7 @@ use opencv::core::Rect;
 use serde_json::Value;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::env;
 use std::fs::File;
 use std::path::Path;
 use std::time::Duration;
@@ -263,6 +264,18 @@ fn cant_find(field: &str) -> KickbotError {
     KickbotError::JsonError(format!("Couldn't find field {field}"))
 }
 
+fn read_required_env(name: &str) -> Result<String, KickbotError> {
+    let value = env::var(name).map_err(|_| {
+        IOError(format!(
+            "Environment variable {name} is missing or is not valid Unicode"
+        ))
+    })?;
+    if value.trim().is_empty() {
+        return Err(IOError(format!("Environment variable {name} is empty")));
+    }
+    Ok(value)
+}
+
 fn to_rgb(object: &Value, field: &str) -> Result<RGB, KickbotError> {
     let array = deserialize(object, field, Value::as_array)?;
     if array.len() != 3 {
@@ -299,6 +312,13 @@ fn to_rect(object: &Value, field: &str) -> Result<Rect, KickbotError> {
 
 impl Config {
     pub async fn read_config(filename: &str) -> Result<Config, KickbotError> {
+        dotenv::dotenv().map_err(|_| {
+            IOError("Failed to load .env; check file existence and syntax".to_string())
+        })?;
+        let bf1_path = read_required_env("BF1_PATH")?;
+        let kick_webhook_url = read_required_env("KICK_WEBHOOK")?;
+        let monitoring_webhook_url = read_required_env("MONITORING_WEBHOOK")?;
+
         let reader = File::open(filename).map_err(|err| {
             KickbotError::JsonError(format!(
                 "Failed to open file {}: {}",
@@ -367,36 +387,16 @@ impl Config {
             secondary_names: secondary_names_hmg,
         };
 
-        // can't be bothered to adapt deserialize, just hardcode
-        let kick_webhook_url = json
-            .get("kick_webhook")
-            .ok_or(JsonError("Couldn't find kick_webhook".to_string()))?
-            .as_str()
-            .ok_or(JsonError("Couldn't parse kick_webhook as str".to_string()))?;
-        let monitoring_webhook_url = json
-            .get("monitoring_webhook")
-            .ok_or(JsonError("Couldn't find monitoring_webhook".to_string()))?
-            .as_str()
-            .ok_or(JsonError(
-                "Couldn't parse monitoring_webhook as str".to_string(),
-            ))?;
-
-        let bf1_path = json
-            .get("bf1_path")
-            .ok_or(JsonError("Couldn't find bf1_path".to_string()))?
-            .as_str()
-            .ok_or(JsonError("Couldn't parse bf1_path as str".to_string()))?;
-
         Ok(Config {
-            bf1_path: String::from(bf1_path),
+            bf1_path,
             kicks_to_ping: deserialize_primitive(&json, "kicks_to_ping", Value::as_u64)?,
             min_players_for_kick: deserialize_primitive(
                 &json,
                 "min_players_for_kick",
                 Value::as_u64,
             )?,
-            kick_webhook: DiscordWebhook::new(kick_webhook_url, "SpecBot").await?,
-            monitoring_webhook: DiscordWebhook::new(monitoring_webhook_url, "SpecBot").await?,
+            kick_webhook: DiscordWebhook::new(&kick_webhook_url, "SpecBot").await?,
+            monitoring_webhook: DiscordWebhook::new(&monitoring_webhook_url, "SpecBot").await?,
             player_similar_name_probability: deserialize_primitive(
                 &json,
                 "player_similar_name_probability",

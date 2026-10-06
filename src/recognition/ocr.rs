@@ -10,7 +10,8 @@ pub struct OCR {
 
 impl OCR {
     pub fn new() -> OCR {
-        let mut tesseract = Tesseract::new(Some("tessdata"), Some("bf1")).unwrap();
+        let mut tesseract =
+            Tesseract::new(Some("model_weights"), Some("player_weapon_ocr")).unwrap();
         tesseract.set_page_seg_mode(PageSegMode::PsmSingleLine);
         let tesseract = tesseract
             .set_variable("debug_file", "nul")
