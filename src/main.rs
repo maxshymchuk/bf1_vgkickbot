@@ -2,17 +2,21 @@ extern crate core;
 
 mod api;
 mod botstatus;
+mod calibration;
 mod config;
 mod console;
 mod cycle;
 mod discord;
 mod errors;
+mod failure;
 mod recognition;
 
 use crate::api::bf1api::server::ServerDetails;
 use crate::api::bf1api::BF1Api;
 use crate::botstatus::{BotStatus, StatusTypes};
-use crate::config::{load_kick_history_record, save_kick_record, Config, PlayerKickHistoryRecord};
+use crate::config::{
+    load_kick_history_record, save_kick_record, Config, PlayerKickHistoryRecord, StartupConfig,
+};
 use crate::console::{clear, log, update_status};
 use crate::cycle::{execute, Executors, GameState, SpecCycle};
 use crate::discord::{announce_bot_crashed, announce_monitoring, announce_shutdown};
@@ -30,7 +34,7 @@ use std::ffi::CString;
 use std::io::ErrorKind;
 use std::ops::Deref;
 use std::path::Path;
-use std::process::{exit, Command};
+use std::process::{exit, Command, ExitCode};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use std::{env, io, thread};
@@ -38,10 +42,10 @@ use sysinfo::System;
 use tokio::sync::{Mutex, OnceCell, RwLock};
 use tokio::time::sleep;
 use win_screenshot::prelude::find_window;
-use windows::core::PCSTR;
+use windows::core::{w, PCSTR};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Console::SetConsoleCtrlHandler;
-use windows::Win32::UI::WindowsAndMessaging::{FindWindowA, SetForegroundWindow};
+use windows::Win32::UI::WindowsAndMessaging::{FindWindowA, FindWindowW, SetForegroundWindow};
 /*
 Don't try refactor this piece of shit, it works on hopes, dreams and an incredibly poorly written web of functions
  */
@@ -55,14 +59,27 @@ struct BotStats {
 static BOT_STATS: OnceLock<Arc<RwLock<BotStats>>> = OnceLock::new();
 
 static CONFIG: OnceCell<Config> = OnceCell::const_new();
+static CONFIG_FILENAME: OnceLock<String> = OnceLock::new();
 
 static KICK_RECORD: OnceLock<Arc<Mutex<PlayerKickHistoryRecord>>> = OnceLock::new();
 
 static mut DO_EXIT_ANNOUNCEMENT: bool = true;
 
-unsafe fn restart_bot() -> io::Result<()> {
+async unsafe fn restart_bot() -> io::Result<()> {
+    if let Some(record) = KICK_RECORD.get() {
+        save_kick_record(record.lock().await.deref())?;
+    }
     let current_exe = env::current_exe()?;
-    Command::new(current_exe).args(&["0"]).status()?;
+    Command::new(current_exe)
+        .args([
+            "0",
+            "--config",
+            CONFIG_FILENAME
+                .get()
+                .map(String::as_str)
+                .unwrap_or("config.json"),
+        ])
+        .spawn()?;
     DO_EXIT_ANNOUNCEMENT = false;
 
     clear();
@@ -81,11 +98,9 @@ fn kill_bf1() {
     };
 }
 
-fn launch_bf1_join_server(path_str: String, game_id: String) {
-    //"C:\Program Files\EA Games\Battlefield 1\bf1.exe" -gameMode MP -role solder -asSpectator true -gameId ...
-    let path = Path::new(path_str.as_str());
-    if let Err(err) = Command::new(path)
-        .args(&[
+fn launch_bf1_join_server(path_str: String, game_id: String) -> io::Result<()> {
+    Command::new(&path_str)
+        .args([
             "-gameMode",
             "MP",
             "-role",
@@ -93,33 +108,26 @@ fn launch_bf1_join_server(path_str: String, game_id: String) {
             "-asSpectator",
             "true",
             "-gameId",
-            game_id.as_str(),
+            &game_id,
         ])
-        .status()
-    {
-        log(&KickbotError::IOError(format!(
-            "Failed to launch BF1 at path {}",
-            path.as_os_str().to_str().unwrap()
-        )));
-    }
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| {
+            failure::with_message(
+                "Could not start Battlefield 1.\nCheck bf1_path and make sure the game is installed.",
+                io::Error::new(
+                error.kind(),
+                format!("Failed to launch BF1 at {path_str}: {error}"),
+                ),
+            )
+        })
 }
 
 async fn try_focus_bf1() {
-    let window_title = String::from("Battlefield™ 1");
-    let mut hwnd = unsafe { FindWindowA(None, PCSTR::from_raw(window_title.as_ptr())).ok() };
-
-    if let Some(hwnd) = hwnd {
-        if hwnd.0 != std::ptr::null_mut() {
-            unsafe {
-                let _ = SetForegroundWindow(hwnd);
-            }
+    if let Ok(hwnd) = unsafe { FindWindowW(None, w!("Battlefield™ 1")) } {
+        unsafe {
+            let _ = SetForegroundWindow(hwnd);
         }
-    }
-
-    if let Ok(mut enigo) = Enigo::new(&Settings::default()) {
-        let _ = enigo.button(Button::Left, Press);
-        sleep(Duration::from_secs(1)).await;
-        let _ = enigo.button(Button::Left, Release);
     }
 }
 
@@ -129,7 +137,7 @@ async fn focus_bf1_once_running() {
     }
     sleep(Duration::from_secs(10)).await;
     unsafe {
-        if let Err(err) = restart_bot() {
+        if let Err(err) = restart_bot().await {
             log(&KickbotError::IOError(format!(
                 "Failed to restart bot, please do it manually, {err}"
             )));
@@ -159,6 +167,14 @@ async fn focus_bf1_once_running() {
 }
 
 unsafe extern "system" fn close_handler(_: u32) -> windows::core::BOOL {
+    // Rust must never unwind across the Windows callback boundary.
+    std::panic::catch_unwind(|| close_console()).unwrap_or(windows::core::BOOL(0))
+}
+
+unsafe fn close_console() -> windows::core::BOOL {
+    if CONFIG.get().is_none() || BOT_STATS.get().is_none() || KICK_RECORD.get().is_none() {
+        return windows::core::BOOL(0);
+    }
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -186,13 +202,109 @@ unsafe extern "system" fn close_handler(_: u32) -> windows::core::BOOL {
     windows::core::BOOL(1)
 }
 
-fn main() -> io::Result<()> {
-    let args: Vec<String> = env::args().collect();
-    // Arg 1: Announce monitoring yes/no
-    let mut should_announce_monitor = true;
-    if args.len() >= 2 {
-        should_announce_monitor = args[1].parse::<u8>().unwrap() == 1;
+fn main() -> ExitCode {
+    failure::finish(failure::run_guarded(run))
+}
+
+fn load_startup_config(filename: &str) -> io::Result<StartupConfig> {
+    StartupConfig::load(filename).map_err(|error| {
+        failure::with_message(
+            "The configuration could not be loaded.\nCheck the selected file and the fields listed below.",
+            io::Error::new(ErrorKind::InvalidData, error),
+        )
+    })
+}
+
+struct LaunchOptions {
+    config_filename: String,
+    should_announce_monitor: bool,
+}
+
+impl LaunchOptions {
+    fn parse(args: impl IntoIterator<Item = String>) -> io::Result<Self> {
+        let mut options = Self {
+            config_filename: "config.json".to_string(),
+            should_announce_monitor: true,
+        };
+        let mut args = args.into_iter();
+        while let Some(argument) = args.next() {
+            match argument.as_str() {
+                "--config" => {
+                    options.config_filename = args
+                        .next()
+                        .filter(|path| !path.is_empty() && !path.starts_with("--"))
+                        .ok_or_else(|| {
+                            io::Error::new(
+                                ErrorKind::InvalidInput,
+                                "Usage: vgkickbot.exe [0|1] [--config <path>]",
+                            )
+                        })?;
+                }
+                "0" => options.should_announce_monitor = false,
+                "1" => options.should_announce_monitor = true,
+                _ => {
+                    return Err(io::Error::new(
+                        ErrorKind::InvalidInput,
+                        "Usage: vgkickbot.exe [0|1] [--config <path>]",
+                    ));
+                }
+            }
+        }
+        Ok(options)
     }
+}
+
+#[cfg(test)]
+mod launch_options_tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> io::Result<LaunchOptions> {
+        LaunchOptions::parse(args.iter().map(|arg| arg.to_string()))
+    }
+
+    #[test]
+    fn default_and_explicit_configuration_paths() {
+        let defaults = parse(&[]).unwrap();
+        assert_eq!(defaults.config_filename, "config.json");
+        assert!(defaults.should_announce_monitor);
+        let selected = parse(&["--config", "D:\\BF1 Bot\\settings.json"]).unwrap();
+        assert_eq!(selected.config_filename, "D:\\BF1 Bot\\settings.json");
+        assert!(selected.should_announce_monitor);
+    }
+
+    #[test]
+    fn restart_announcement_argument_does_not_override_configuration() {
+        for args in [
+            ["0", "--config", "settings.json"],
+            ["--config", "settings.json", "0"],
+        ] {
+            let options = parse(&args).unwrap();
+            assert_eq!(options.config_filename, "settings.json");
+            assert!(!options.should_announce_monitor);
+        }
+    }
+
+    #[test]
+    fn invalid_arguments_fail_without_panicking() {
+        for args in [
+            vec!["--config"],
+            vec!["--config", ""],
+            vec!["--config", "--unknown"],
+            vec!["--validate-config"],
+            vec!["--unknown"],
+            vec!["unexpected"],
+        ] {
+            assert_eq!(parse(&args).err().unwrap().kind(), ErrorKind::InvalidInput);
+        }
+    }
+}
+
+fn run(panic_reports: &mut failure::PanicReceiver) -> io::Result<()> {
+    let options = LaunchOptions::parse(env::args().skip(1)).map_err(|error| {
+        failure::with_message("The launch arguments are invalid.\nUse --config followed by a configuration file path.", error)
+    })?;
+    let startup = load_startup_config(&options.config_filename)?;
+    let _ = CONFIG_FILENAME.set(options.config_filename);
 
     unsafe {
         SetConsoleCtrlHandler(Some(close_handler), true)?;
@@ -200,18 +312,65 @@ fn main() -> io::Result<()> {
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .build()?
-        .block_on(main_thread(should_announce_monitor))
+        .build()
+        .map_err(|error| failure::with_message("Could not initialize the bot runtime.", error))?
+        .block_on(failure::supervise(
+            main_thread(options.should_announce_monitor, startup),
+            panic_reports,
+        ))
 }
 
-async fn main_thread(should_announce_monitor: bool) -> io::Result<()> {
-    let config = match Config::read_config("config.json").await {
-        Ok(config) => config,
-        Err(err) => {
-            eprintln!("Error reading config, {err}");
-            return Err(io::Error::new(ErrorKind::InvalidData, err));
+async fn main_thread(should_announce_monitor: bool, mut startup: StartupConfig) -> io::Result<()> {
+    let bf1_api = BF1Api::new(startup.sid(), startup.remid())
+        .await
+        .map_err(|error| {
+            failure::with_message(
+                "Could not authenticate with EA.\nCheck sid/remid and your network connection.",
+                error,
+            )
+        })?;
+
+    static BF1_API: OnceCell<BF1Api> = OnceCell::const_new();
+
+    let display_names = bf1_api
+        .get_display_names_by_persona_ids(vec![bf1_api.persona_id().as_str()])
+        .await
+        .map_err(|error| failure::with_message("Could not read your EA account details.", error))?;
+
+    let user_name = display_names.first().cloned().ok_or_else(|| {
+        failure::with_message(
+            "Could not read your EA account details.",
+            io::Error::other("EA returned no display name for the authenticated account"),
+        )
+    })?;
+    let server = Arc::new(Mutex::new(bf1_api.get_server_by_name("![VG]").await.map_err(|error| {
+        failure::with_message("Could not find or load the Battlefield 1 server.\nCheck the EA connection and server availability.", error)
+    })?));
+
+    let server_cached: ServerDetails = server.lock().await.clone();
+    if !bf1_running() {
+        launch_bf1_join_server(
+            startup.bf1_path().to_string(),
+            server_cached.game_id.clone(),
+        )?;
+        println!("Waiting for the Battlefield 1 window. Monitoring has not started.");
+        while !bf1_running() {
+            sleep(Duration::from_secs(1)).await;
         }
-    };
+    }
+    if startup.needs_calibration() {
+        // No worker tasks, observer controls, model inference, or kick processing
+        // exist until these six recognition fields have been supplied and saved.
+        startup.calibrate_missing().map_err(|error| {
+            failure::with_message(
+                "Recognition setup did not complete.\nMonitoring has not started.",
+                error,
+            )
+        })?;
+    }
+    let config = startup.into_config().await.map_err(|error| {
+        failure::with_message("Could not initialize the bot settings or Discord webhooks.\nCheck the configured values.", error)
+    })?;
 
     BOT_STATS
         .set(Arc::new(RwLock::new(BotStats {
@@ -233,23 +392,17 @@ async fn main_thread(should_announce_monitor: bool) -> io::Result<()> {
             BOT_STATS.get().unwrap().read().await.start_time,
         )
         .await
-        .inspect_err(log)?;
+        .map_err(|error| failure::with_message("Could not send the monitoring-start notification.\nCheck monitoring_webhook and your network connection.", error))?;
     }
-
-    let bf1_api = BF1Api::new().await?;
-
-    static BF1_API: OnceCell<BF1Api> = OnceCell::const_new();
-
-    let display_names = bf1_api
-        .get_display_names_by_persona_ids(vec![bf1_api.persona_id().as_str()])
-        .await?;
-
-    let user_name = display_names[0].clone();
-    let server = Arc::new(Mutex::new(bf1_api.get_server_by_name("![VG]").await?));
 
     let console = Arc::new(Mutex::new(console::Console::new(user_name)));
 
-    let (width, height) = crossterm::terminal::size()?;
+    let (width, height) = crossterm::terminal::size().map_err(|error| {
+        failure::with_message(
+            "Could not access the terminal.\nRun the bot in a console window.",
+            error,
+        )
+    })?;
     console
         .lock()
         .await
@@ -265,7 +418,9 @@ async fn main_thread(should_announce_monitor: bool) -> io::Result<()> {
     CONFIG.set(config).unwrap();
     BF1_API.set(bf1_api).unwrap();
     KICK_RECORD
-        .set(Arc::new(Mutex::new(load_kick_history_record()?)))
+        .set(Arc::new(Mutex::new(load_kick_history_record().map_err(|error| {
+            failure::with_message("Could not load the kick history.\nCheck that the history file is readable and contains valid records.", error)
+        })?)))
         .unwrap();
 
     let spec_cycle = Arc::new(Mutex::new(SpecCycle::new()));
@@ -284,6 +439,11 @@ async fn main_thread(should_announce_monitor: bool) -> io::Result<()> {
 
     tokio::spawn(async move {
         loop {
+            // Yield so runtime shutdown can cancel this task before the Enter prompt.
+            sleep(Duration::from_millis(50)).await;
+            if !poll(Duration::ZERO).unwrap_or(false) {
+                continue;
+            }
             if let Ok(Event::Resize(width, height)) = read() {
                 console_clone
                     .lock()
@@ -361,20 +521,9 @@ async fn main_thread(should_announce_monitor: bool) -> io::Result<()> {
         }
     });
 
-    let server_cached: ServerDetails = server.clone().lock().await.clone();
-
     let classifier = Arc::new(Classifier::new());
 
-    if !bf1_running() {
-        launch_bf1_join_server(
-            CONFIG.get().unwrap().bf1_path.clone(),
-            server_cached.game_id,
-        );
-
-        focus_bf1_once_running().await;
-    } else {
-        try_focus_bf1().await;
-    }
+    try_focus_bf1().await;
 
     // If we crash/don't have BF1, invalidate the last player name
     // So if we don't have a valid last player name then we know not to send a crash message if we don't read one
@@ -435,6 +584,7 @@ async fn main_thread(should_announce_monitor: bool) -> io::Result<()> {
             let bot_status_read = bot_status.read().await;
 
             if bot_status_read.status == StatusTypes::Crashed {
+                drop(bot_status_read);
                 if let Err(err) =
                     announce_bot_crashed(&CONFIG.get().unwrap().monitoring_webhook).await
                 {
@@ -447,10 +597,9 @@ async fn main_thread(should_announce_monitor: bool) -> io::Result<()> {
                 launch_bf1_join_server(
                     CONFIG.get().unwrap().bf1_path.clone(),
                     server.lock().await.clone().game_id,
-                );
+                )?;
                 focus_bf1_once_running().await;
 
-                drop(bot_status_read);
                 bot_status.write().await.status = StatusTypes::WaitingForBF1;
                 update_status(StatusTypes::WaitingForBF1);
             } else if bot_status_read.status != StatusTypes::WaitingForBF1

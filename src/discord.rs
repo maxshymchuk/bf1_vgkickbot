@@ -36,9 +36,13 @@ impl DiscordWebhook {
 }
 
 pub async fn announce_monitoring(
-    monitoring_webhook: &DiscordWebhook,
+    monitoring_webhook: &Option<DiscordWebhook>,
     start_time: DateTime<Utc>,
 ) -> Result<(), KickbotError> {
+    let Some(monitoring_webhook) = monitoring_webhook else {
+        return Ok(());
+    };
+
     let start_time_string = start_time.format("%H:%M:%S").to_string();
     let embed = CreateEmbed::new()
         .title("Now Monitoring")
@@ -89,9 +93,13 @@ fn get_time_difference_string(elapsed_time: TimeDelta) -> String {
 }
 
 pub async fn announce_shutdown(
-    monitoring_webhook: &DiscordWebhook,
+    monitoring_webhook: &Option<DiscordWebhook>,
     bot_stats: &BotStats,
 ) -> Result<(), KickbotError> {
+    let Some(monitoring_webhook) = monitoring_webhook else {
+        return Ok(());
+    };
+
     let elapsed_time = Utc::now() - bot_stats.start_time;
 
     let mut players_kicked_string = format!("{} players", bot_stats.players_kicked.to_string());
@@ -124,9 +132,13 @@ pub async fn announce_shutdown(
 }
 
 async fn announce_kick(
-    kick_webhook: &DiscordWebhook,
+    kick_webhook: &Option<DiscordWebhook>,
     embed: CreateEmbed,
 ) -> Result<(), KickbotError> {
+    let Some(kick_webhook) = kick_webhook else {
+        return Ok(());
+    };
+
     let builder = ExecuteWebhook::new().embed(embed).username("Spec Bot");
     kick_webhook
         .webhook
@@ -138,7 +150,7 @@ async fn announce_kick(
 }
 
 pub async fn announce_kick_success(
-    kick_webhook: &DiscordWebhook,
+    kick_webhook: &Option<DiscordWebhook>,
     player_name: &str,
     player_pid: &str,
     reason: &str,
@@ -154,7 +166,7 @@ pub async fn announce_kick_success(
 }
 
 pub async fn announce_kick_fail(
-    kick_webhook: &DiscordWebhook,
+    kick_webhook: &Option<DiscordWebhook>,
     player_name: &str,
     player_pid: &str,
     reason: &str,
@@ -171,12 +183,16 @@ pub async fn announce_kick_fail(
 }
 
 pub async fn announce_player_multiple_kicks(
-    kick_webhook: &DiscordWebhook,
+    kick_webhook: &Option<DiscordWebhook>,
     player_name: &str,
     player_pid: &str,
     number_of_kicks: u64,
     record: &HashMap<String, Vec<DateTime<Utc>>>,
 ) -> Result<(), KickbotError> {
+    let Some(kick_webhook) = kick_webhook else {
+        return Ok(());
+    };
+
     let id = "<admin id>";
     let embed_msg_content = format!("<@&{}>\n", id);
 
@@ -229,7 +245,13 @@ pub async fn announce_player_multiple_kicks(
     Ok(())
 }
 
-pub async fn announce_bot_crashed(monitoring_webhook: &DiscordWebhook) -> Result<(), KickbotError> {
+pub async fn announce_bot_crashed(
+    monitoring_webhook: &Option<DiscordWebhook>,
+) -> Result<(), KickbotError> {
+    let Some(monitoring_webhook) = monitoring_webhook else {
+        return Ok(());
+    };
+
     let embed = CreateEmbed::new()
         .color(Color::DARK_RED)
         .description("BF1 Crashed, restarting...");
@@ -246,4 +268,34 @@ pub async fn announce_bot_crashed(monitoring_webhook: &DiscordWebhook) -> Result
         })?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_webhooks_make_all_notification_paths_noops() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let disabled = None;
+            let stats = BotStats {
+                start_time: Utc::now(),
+                players_kicked: 0,
+            };
+            announce_monitoring(&disabled, stats.start_time)
+                .await
+                .unwrap();
+            announce_shutdown(&disabled, &stats).await.unwrap();
+            announce_kick_success(&disabled, "test", "1", "reason")
+                .await
+                .unwrap();
+            announce_kick_fail(&disabled, "test", "1", "reason", "error")
+                .await
+                .unwrap();
+            announce_player_multiple_kicks(&disabled, "test", "1", 10, &HashMap::new())
+                .await
+                .unwrap();
+            announce_bot_crashed(&disabled).await.unwrap();
+        });
+    }
 }

@@ -10,12 +10,12 @@ ndarray = "0.17.2"
 opencv = { version = "0.101.0", default-features = false, features = ["clang-runtime", "imgproc", "imgcodecs", "highgui"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "cookies", "rustls"] }
 serenity = { version = "0.12.5", default-features = false, features = ["model", "rustls_backend"] }
-tokio = { version = "1.53.2", features = ["rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "sync", "time", "macros"] }
 win-screenshot = "4.0.14"
 serde = { version = "1.0.229", features = ["derive"] }
-dotenv = "0.15.0"
 enigo = { version = "0.6.1", default-features = false }
 serde_json = "1.0.151"
+jsonschema = { version = "0.58.6", default-features = false }
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "download-binaries", "copy-dylibs", "tls-rustls", "api-27"] }
 crossterm = "0.29.0"
 tesseract = "0.15.2"
@@ -31,4 +31,29 @@ features = ["v4"]
 [dependencies.windows]
 version = "0.62.2"
 features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Console"]
+
+[package.metadata.vcpkg]
+git = "https://github.com/microsoft/vcpkg"
+rev = "434307da09bc05b2c86996dccc8b2351fc0d5d37"
+dependencies = [
+    "tesseract",
+    "leptonica",
+    "opencv4[core,fs,highgui,jpeg,png,win32ui]",
+]
+
+[package.metadata.vcpkg.target.x86_64-pc-windows-msvc]
+triplet = "x64-windows-static-md"
+
+[package.metadata.build-tools]
+cargo-vcpkg = "0.1.7"
+llvm-version = "23.1.2"
+llvm-archive-sha256 = "ceaee048142fece144752c6f6431cb0905a7a6160f78ab8cf5cf0b6216f99418"
+clang-sha256 = "86d0fe0705bc5edbd223fba597b461dedf840a48bb3c59f0a4312a9df4e2d5bd"
+libclang-sha256 = "19d1bd94bbe9b85b5529b53ca9e3e90aa005c9cc0874bbd4ed25b35da28ec4ec"
+7zip-min-version = "26.03"
+
+[package.metadata.build-tools.native-versions]
+tesseract = "5.5.3"
+leptonica = "1.87.0"
+opencv4 = "4.14.0"
 

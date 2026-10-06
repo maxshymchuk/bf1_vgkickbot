@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Battlefield 1 Kickbot configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sid",
+    "remid",
+    "bf1_path"
+  ],
+  "properties": {
+    "$schema": {
+      "$ref": "#/$defs/nonempty_string",
+      "description": "Optional editor schema reference; runtime validation uses the embedded schema."
+    },
+    "sid": {
+      "$ref": "#/$defs/cookie",
+      "description": "EA sid cookie value without its prefix."
+    },
+    "remid": {
+      "$ref": "#/$defs/cookie",
+      "description": "EA remid cookie value without its prefix."
+    },
+    "bf1_path": {
+      "$ref": "#/$defs/nonempty_string",
+      "description": "Path to the Battlefield 1 executable."
+    },
+    "kick_webhook": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/https_url"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "const": ""
+        }
+      ],
+      "default": null,
+      "description": "Optional Discord webhook; omit, null, or empty string disables requests."
+    },
+    "monitoring_webhook": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/https_url"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "const": ""
+        }
+      ],
+      "default": null,
+      "description": "Optional Discord webhook; omit, null, or empty string disables requests."
+    },
+    "kicks_to_ping": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615,
+      "description": "Notify after every N accumulated kicks for a player.",
+      "default": 10
+    },
+    "min_players_for_kick": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615,
+      "description": "Minimum server population for enabling kicking.",
+      "default": 10
+    },
+    "player_similar_name_probability": {
+      "$ref": "#/$defs/probability",
+      "description": "Player-name string similarity threshold.",
+      "default": 0.97
+    },
+    "weapon_similar_name_probability": {
+      "$ref": "#/$defs/probability",
+      "description": "Weapon-name string similarity threshold.",
+      "default": 0.85
+    },
+    "save_screenshots": {
+      "type": "boolean",
+      "default": false,
+      "description": "Optional screenshot saving toggle; defaults to false."
+    },
+    "rotate_delay": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 86400,
+      "description": "Delay in seconds before detection and observer rotation; at most one day.",
+      "default": 2
+    },
+    "player_name_box": {
+      "$ref": "#/$defs/rectangle",
+      "description": "Player-name OCR region. If omitted, startup waits for interactive recognition setup."
+    },
+    "weapon_icon_probability": {
+      "$ref": "#/$defs/probability",
+      "description": "Weapon/vehicle classifier confidence threshold.",
+      "default": 0.9
+    },
+    "weapon_icon_box": {
+      "$ref": "#/$defs/rectangle",
+      "description": "Weapon/vehicle icon classifier region. If omitted, startup waits for interactive recognition setup."
+    },
+    "weapon_slot_1_name_box": {
+      "$ref": "#/$defs/rectangle",
+      "description": "First weapon-slot OCR region. If omitted, startup waits for interactive recognition setup."
+    },
+    "weapon_slot_2_name_box": {
+      "$ref": "#/$defs/rectangle",
+      "description": "Second weapon-slot OCR region. If omitted, startup waits for interactive recognition setup."
+    },
+    "gadget_slot_1_box": {
+      "$ref": "#/$defs/rectangle",
+      "description": "Optional legacy first gadget region; gadget detection is not implemented."
+    },
+    "gadget_slot_2_box": {
+      "$ref": "#/$defs/rectangle",
+      "description": "Optional legacy second gadget region; gadget detection is not implemented."
+    },
+    "ally_colour": {
+      "$ref": "#/$defs/rgb",
+      "description": "Allied player-name text RGB colour. If omitted, startup waits for interactive recognition setup."
+    },
+    "enemy_colour": {
+      "$ref": "#/$defs/rgb",
+      "description": "Enemy player-name text RGB colour. If omitted, startup waits for interactive recognition setup."
+    },
+    "banned_vehicles": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "heavybomber": {
+          "$ref": "#/$defs/vehicle_names",
+          "description": "Heavy-bomber OCR names."
+        },
+        "hmg": {
+          "$ref": "#/$defs/vehicle_names",
+          "description": "Legacy key for the mortar-truck/LMG detector."
+        }
+      },
+      "default": {
+        "heavybomber": {
+          "primary_names": [
+            "HEAVY BOMBER",
+            "BOMBS"
+          ],
+          "secondary_names": [
+            "BOMBS",
+            "HEAVY BOMBER"
+          ]
+        },
+        "hmg": {
+          "primary_names": [
+            "LMG"
+          ],
+          "secondary_names": [
+            "MORTAR",
+            "MORTAR TRUCK"
+          ]
+        }
+      }
+    },
+    "banned_weapon": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "weapon_names": {
+          "$ref": "#/$defs/names",
+          "description": "OCR aliases for prohibited SMG 08/18 variants."
+        }
+      },
+      "default": {
+        "weapon_names": [
+          "SMG 08/18 Factory",
+          "SMG 08/18 Optical",
+          "SMG 08/18",
+          "SMG08/18"
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "nonempty_string": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "cookie": {
+      "type": "string",
+      "pattern": "^[^\\s;]+$"
+    },
+    "https_url": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://\\S+$"
+    },
+    "probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "rectangle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1073741823
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1073741823
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741823
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741823
+        }
+      }
+    },
+    "rgb": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 255
+      }
+    },
+    "names": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/nonempty_string"
+      }
+    },
+    "vehicle_names": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "primary_names": {
+          "$ref": "#/$defs/names"
+        },
+        "secondary_names": {
+          "$ref": "#/$defs/names"
+        }
+      }
+    }
+  }
+}

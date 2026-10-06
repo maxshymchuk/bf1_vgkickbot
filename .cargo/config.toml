@@ -1,0 +1,5 @@
+[env]
+LIBCLANG_PATH = { value = "target/build-tools/llvm/bin", relative = true }
+CLANG_PATH = { value = "target/build-tools/llvm/bin/clang.exe", relative = true }
+VCPKG_ROOT = { value = "target/vcpkg", relative = true }
+VCPKGRS_TRIPLET = { value = "x64-windows-static-md" }

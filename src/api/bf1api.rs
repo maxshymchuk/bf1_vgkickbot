@@ -7,7 +7,6 @@ use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
-use std::env;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -171,43 +170,28 @@ pub struct BF1Api {
 }
 
 impl BF1Api {
-    pub async fn new() -> Result<BF1Api, BF1ApiError> {
-        if let None = dotenv::dotenv().ok() {
-            return Err(BF1ApiSubError::EnvError(String::from("No .env file found")).into());
-        }
-        let sid = env::var("SID").map_err(|err| BF1ApiSubError::VarError {
-            var: String::from("SID"),
-            err,
-        })?;
-        let remid = env::var("REMID").map_err(|err| BF1ApiSubError::VarError {
-            var: String::from("REMID"),
-            err,
-        })?;
-
+    pub async fn new(sid: &str, remid: &str) -> Result<BF1Api, BF1ApiError> {
         let mut rest_headers = HeaderMap::new();
         rest_headers.insert(
             COOKIE,
-            format!("remid={};sid={};", remid, sid).parse().unwrap(),
+            format!("remid={};sid={};", remid, sid)
+                .parse()
+                .map_err(|_| {
+                    BF1ApiSubError::ResponseError("Invalid sid/remid cookie header".to_string())
+                })?,
         );
         let client = Client::new();
         let access_token = get_access_token(&client, rest_headers.clone())
             .await
             .provide_api_function("Get Access Token")?;
 
-        println!("Access Token: {}", access_token.access_token);
-
-        let auth_code_client = Client::builder().redirect(Policy::none()).build().unwrap();
+        let auth_code_client = Client::builder().redirect(Policy::none()).build()?;
         let resp_auth = get_auth_code(&auth_code_client, rest_headers.clone())
             .await
             .provide_api_function("Get Auth Code")?;
 
-        println!("Resp Auth Remid: {}", resp_auth.remid);
-        println!("Resp Auth Sid: {}", resp_auth.sid);
-        println!("Resp Auth Code: {}", resp_auth.code);
         let (session_id, persona_id) =
             get_session_and_persona_ids_by_authcode(&client, resp_auth.code.as_str()).await?;
-
-        println!("Session ID: {}, Persona ID: {}", session_id, persona_id);
 
         let mut rpc_header = HeaderMap::new();
         rpc_header.insert(

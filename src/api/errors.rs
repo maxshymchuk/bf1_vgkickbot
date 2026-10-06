@@ -1,4 +1,3 @@
-use std::env::VarError;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 
@@ -55,8 +54,6 @@ pub enum BF1ApiSubError {
     RequestError(reqwest::Error),
     ResponseError(String),
     JsonError(String),
-    VarError { var: String, err: VarError },
-    EnvError(String),
 }
 
 impl Display for BF1ApiSubError {
@@ -67,12 +64,6 @@ impl Display for BF1ApiSubError {
             }
             BF1ApiSubError::ResponseError(err) => {
                 write!(f, "{}", err.to_string())
-            }
-            BF1ApiSubError::VarError { var, err } => {
-                write!(f, "ENV error for VAR {}, message: {}", var, err.to_string())
-            }
-            BF1ApiSubError::EnvError(err) => {
-                write!(f, "ENV error: {}", err.to_string())
             }
             BF1ApiSubError::JsonError(err) => {
                 write!(f, "Json Error: {}", err)
